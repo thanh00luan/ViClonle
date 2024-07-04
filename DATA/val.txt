@@ -1,0 +1,1 @@
+C:\Users\thanh\CODE\Python\TTS\ViClonle\DATA\wavs\VIVOSDEV02_R106.wav|C:\Users\thanh\CODE\Python\TTS\ViClonle\DATA\embedding\VIVOSDEV02_R106.npy|trở nên thụ động
