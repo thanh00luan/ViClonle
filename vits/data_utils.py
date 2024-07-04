@@ -4,11 +4,11 @@ import random
 import numpy as np
 import torch
 import torch.utils.data
-
 import commons 
 from mel_processing import spectrogram_torch
 from utils import load_wav_to_torch, load_filepaths_and_text
 from text import text_to_sequence, cleaned_text_to_sequence
+
 
 
 class TextAudioLoader(torch.utils.data.Dataset):
@@ -33,6 +33,8 @@ class TextAudioLoader(torch.utils.data.Dataset):
         self.min_text_len = getattr(hparams, "min_text_len", 1)
         self.max_text_len = getattr(hparams, "max_text_len", 190)
 
+
+        print(f"fuck you:{self.audiopaths_and_text}")
         random.seed(1234)
         random.shuffle(self.audiopaths_and_text)
         self._filter()
@@ -48,24 +50,34 @@ class TextAudioLoader(torch.utils.data.Dataset):
 
         audiopaths_and_text_new = []
         lengths = []
-        for audiopath, text in self.audiopaths_and_text:
-            if self.min_text_len <= len(text) and len(text) <= self.max_text_len:
-                audiopaths_and_text_new.append([audiopath, text])
+        for audiopath, embedpath, text in self.audiopaths_and_text:
+            try:
+                if self.min_text_len <= len(text) and len(text) <= self.max_text_len:
+                    audiopaths_and_text_new.append([audiopath, embedpath, text])
 
-                spec_filename = audiopath.replace(".wav", ".spec.pt")
-                if os.path.exists(spec_filename):
-                    lengths.append(float(torch.load(spec_filename).size(1)) // 2)
-                else:
-                    lengths.append(os.path.getsize(audiopath) // (2 * self.hop_length))
+                    spec_filename = audiopath.replace(".wav", ".spec.pt")                    
+                    if os.path.exists(spec_filename):
+                        lengths.append(float(torch.load(spec_filename).size(1)) // 2)
+                    else:
+                        lengths.append(os.path.getsize(audiopath) // (2 * self.hop_length))
+            except Exception as e:
+                raise e 
+
         self.audiopaths_and_text = audiopaths_and_text_new
         self.lengths = lengths
 
     def get_audio_text_pair(self, audiopath_and_text):
         # separate filename and text
-        audiopath, text = audiopath_and_text[0], audiopath_and_text[1]
+        audiopath, embedpath, text = audiopath_and_text[0], audiopath_and_text[1], audiopath_and_text[2]
         text = self.get_text(text)
         spec, wav = self.get_audio(audiopath)
-        return (text, spec, wav)
+        speaker_embedding = self.get_speaker_embedding(embedpath)
+        return (text, spec, wav,speaker_embedding)
+    
+    def get_speaker_embedding(self, embedpath):
+        speaker_embedding = np.load(embedpath)
+        return torch.FloatTensor(speaker_embedding)
+
 
     def get_audio(self, filename):
         audio, sampling_rate = load_wav_to_torch(filename)
@@ -77,6 +89,7 @@ class TextAudioLoader(torch.utils.data.Dataset):
         spec_filename = filename.replace(".wav", ".spec.pt")
         if os.path.exists(spec_filename):
             spec = torch.load(spec_filename)
+            print(f"spec: {spec}")
         else:
             spec = spectrogram_torch(audio_norm, self.filter_length,
                 self.sampling_rate, self.hop_length, self.win_length,
@@ -88,6 +101,7 @@ class TextAudioLoader(torch.utils.data.Dataset):
     def get_text(self, text):
         if self.cleaned_text:
             text_norm = cleaned_text_to_sequence(text)
+            print(f"text_norm: {text_norm}")
         else:
             text_norm = text_to_sequence(text, self.text_cleaners)
         if self.add_blank:
@@ -109,12 +123,6 @@ class TextAudioCollate():
         self.return_ids = return_ids
 
     def __call__(self, batch):
-        """Collate's training batch from normalized text and aduio
-        PARAMS
-        ------
-        batch: [text_normalized, spec_normalized, wav_normalized]
-        """
-        # Right zero-pad all one-hot text sequences to max input length
         _, ids_sorted_decreasing = torch.sort(
             torch.LongTensor([x[1].size(1) for x in batch]),
             dim=0, descending=True)
@@ -122,6 +130,7 @@ class TextAudioCollate():
         max_text_len = max([len(x[0]) for x in batch])
         max_spec_len = max([x[1].size(1) for x in batch])
         max_wav_len = max([x[2].size(1) for x in batch])
+        max_embed_len = batch[0][3].size(0)
 
         text_lengths = torch.LongTensor(len(batch))
         spec_lengths = torch.LongTensor(len(batch))
@@ -130,9 +139,13 @@ class TextAudioCollate():
         text_padded = torch.LongTensor(len(batch), max_text_len)
         spec_padded = torch.FloatTensor(len(batch), batch[0][1].size(0), max_spec_len)
         wav_padded = torch.FloatTensor(len(batch), 1, max_wav_len)
+        embed_padded = torch.FloatTensor(len(batch), max_embed_len)
+        
         text_padded.zero_()
         spec_padded.zero_()
         wav_padded.zero_()
+        embed_padded.zero_()
+        
         for i in range(len(ids_sorted_decreasing)):
             row = batch[ids_sorted_decreasing[i]]
 
@@ -148,9 +161,13 @@ class TextAudioCollate():
             wav_padded[i, :, :wav.size(1)] = wav
             wav_lengths[i] = wav.size(1)
 
+            embed = row[3]
+            embed_padded[i, :] = embed
+
         if self.return_ids:
-            return text_padded, text_lengths, spec_padded, spec_lengths, wav_padded, wav_lengths, ids_sorted_decreasing
-        return text_padded, text_lengths, spec_padded, spec_lengths, wav_padded, wav_lengths
+            return text_padded, text_lengths, spec_padded, spec_lengths, wav_padded, wav_lengths, embed_padded, ids_sorted_decreasing
+        return text_padded, text_lengths, spec_padded, spec_lengths, wav_padded, wav_lengths, embed_padded
+
 
 
 """Multi speaker version"""
@@ -178,6 +195,7 @@ class TextAudioSpeakerLoader(torch.utils.data.Dataset):
 
         random.seed(1234)
         random.shuffle(self.audiopaths_sid_text)
+        print("Chuan bi filter")
         self._filter(hparams)
 
     def get_speaker_embedding(self, path):
