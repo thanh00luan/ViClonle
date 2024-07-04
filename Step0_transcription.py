@@ -29,12 +29,12 @@ def extract_audio(filename, channels=1, rate=16000):
 class Wav2Vec:
      def __init__(self):
           
-          self.device = "cuda"
+          self.device = "cpu"  # Sử dụng CPU thay vì GPU
           # Load Wav2Vec
           cache_dir = './cache/'
           self.processor = Wav2Vec2Processor.from_pretrained("nguyenvulebinh/wav2vec2-base-vietnamese-250h", cache_dir=cache_dir)
           lm_file = hf_bucket_url("nguyenvulebinh/wav2vec2-base-vietnamese-250h", filename='vi_lm_4grams.bin.zip')
-          lm_file = cached_path(lm_file,cache_dir=cache_dir)
+          lm_file = cached_path(lm_file, cache_dir=cache_dir)
           with zipfile.ZipFile(lm_file, 'r') as zip_ref:
                zip_ref.extractall(cache_dir)
           lm_file = cache_dir + 'vi_lm_4grams.bin'
